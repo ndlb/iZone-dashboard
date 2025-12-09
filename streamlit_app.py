@@ -13,29 +13,36 @@ REQUIRED_COLS = {"Timestamp", "Average Occupancy"}
 def load_csv_with_optional_header(uploaded_file):
     """
     1) Try reading CSV assuming first line is header.
-    2) If required columns not found, re-read skipping first 6 lines.
+    2) If parsing fails OR required columns not found, re-read skipping first 6 lines.
     Uses only 'Timestamp' + 'Average Occupancy'.
     """
     content = uploaded_file.getvalue()
 
-    # First try: no skiprows
-    df = pd.read_csv(io.BytesIO(content))
-
-    if not REQUIRED_COLS.issubset(df.columns):
-        # Second try: skip first 6 lines (metadata)
+    # First attempt: normal read
+    try:
+        df = pd.read_csv(io.BytesIO(content))
+    except Exception:
+        # Parsing failed (like your file: 2 columns in first row, 6 later)
         df = pd.read_csv(io.BytesIO(content), skiprows=6)
+    else:
+        # Parsed OK but maybe header is metadata; check for required columns
+        if not REQUIRED_COLS.issubset(df.columns):
+            df = pd.read_csv(io.BytesIO(content), skiprows=6)
 
+    # After the fallback, we must have the right columns
     if not REQUIRED_COLS.issubset(df.columns):
         raise ValueError(
             "Could not find required columns 'Timestamp' and "
             "'Average Occupancy' in the CSV."
         )
 
+    # Keep only the two columns we care about
     df = df[list(REQUIRED_COLS)].dropna()
     df["Timestamp"] = pd.to_datetime(df["Timestamp"])
     df = df.sort_values("Timestamp")
     df = df.rename(columns={"Timestamp": "ds", "Average Occupancy": "y"})
     return df
+
 
 
 def train_prophet(df):

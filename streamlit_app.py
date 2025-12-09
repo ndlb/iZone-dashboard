@@ -12,7 +12,8 @@ REQUIRED_COLS = {"Timestamp", "Average Occupancy"}
 
 def load_csv_with_optional_header(uploaded_file):
     """
-    1) Try reading CSV assuming first line is header.
+    Load CSV that may have 6 lines of metadata at the top.
+    1) Try reading normally.
     2) If parsing fails OR required columns not found, re-read skipping first 6 lines.
     Uses only 'Timestamp' + 'Average Occupancy'.
     """
@@ -22,27 +23,25 @@ def load_csv_with_optional_header(uploaded_file):
     try:
         df = pd.read_csv(io.BytesIO(content))
     except Exception:
-        # Parsing failed (like your file: 2 columns in first row, 6 later)
+        # Parsing failed (e.g. metadata rows with different column counts)
         df = pd.read_csv(io.BytesIO(content), skiprows=6)
     else:
-        # Parsed OK but maybe header is metadata; check for required columns
+        # Parsed OK but may not have the right header row
         if not REQUIRED_COLS.issubset(df.columns):
             df = pd.read_csv(io.BytesIO(content), skiprows=6)
 
-    # After the fallback, we must have the right columns
+    # After fallback, we must have the right columns
     if not REQUIRED_COLS.issubset(df.columns):
         raise ValueError(
             "Could not find required columns 'Timestamp' and "
             "'Average Occupancy' in the CSV."
         )
 
-    # Keep only the two columns we care about
     df = df[list(REQUIRED_COLS)].dropna()
     df["Timestamp"] = pd.to_datetime(df["Timestamp"])
     df = df.sort_values("Timestamp")
     df = df.rename(columns={"Timestamp": "ds", "Average Occupancy": "y"})
     return df
-
 
 
 def train_prophet(df):
@@ -88,44 +87,74 @@ def aggregate_to_daily_avg(forecast_df):
     daily["date"] = pd.to_datetime(daily["date"])
     daily["dow"] = daily["date"].dt.weekday        # 0=Mon, 6=Sun
     daily["day_name"] = daily["date"].dt.day_name()
-    daily["dom"] = daily["date"].dt.day
+    daily["dom"] = daily["date"].dt.day            # day of month
     daily["week_in_month"] = ((daily["dom"] - 1) // 7) + 1
     return daily
 
 
 def build_calendar_matrix(daily_df):
+    """
+    Build a matrix for the heatmap:
+      rows  = day of week (Mon–Sun)
+      cols  = day of month (1..max_dom in the selected range)
+    """
     if daily_df.empty:
         return None, None, None
 
-    max_week = daily_df["week_in_month"].max()
-    mat = np.full((7, max_week), np.nan)
+    max_dom = daily_df["dom"].max()
+
+    mat = np.full((7, max_dom), np.nan)
 
     for _, row in daily_df.iterrows():
-        r = row["dow"]
-        c = row["week_in_month"] - 1
+        r = row["dow"]       # 0..6
+        c = row["dom"] - 1   # day 1 -> col 0
         mat[r, c] = row["traffic_pred"]
 
     day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    col_labels = [f"W{w}" for w in range(1, max_week + 1)]
+    col_labels = [str(d) for d in range(1, max_dom + 1)]
     return mat, day_labels, col_labels
 
 
 def plot_calendar_heatmap(daily_df, title):
+    """
+    GitHub-style monthly heatmap:
+      x-axis: day of month
+      y-axis: day of week
+      color: occupancy (green -> yellow -> red)
+      with rounded traffic values annotated in each cell.
+    """
     mat, day_labels, col_labels = build_calendar_matrix(daily_df)
     if mat is None:
         return None
 
-    fig, ax = plt.subplots(figsize=(8, 3))
-    im = ax.imshow(mat, aspect="auto", interpolation="nearest")
+    fig, ax = plt.subplots(figsize=(10, 3))
+
+    # Colormap: RdYlGn (green low, red high)
+    im = ax.imshow(mat, aspect="auto", interpolation="nearest", cmap="RdYlGn")
 
     ax.set_yticks(range(len(day_labels)))
     ax.set_yticklabels(day_labels)
+
     ax.set_xticks(range(len(col_labels)))
     ax.set_xticklabels(col_labels)
 
-    ax.set_xlabel("Week in month")
+    ax.set_xlabel("Day of month")
     ax.set_ylabel("Day of week")
     ax.set_title(title)
+
+    # Annotate each non-NaN cell with rounded traffic value
+    for i in range(mat.shape[0]):          # rows (dow)
+        for j in range(mat.shape[1]):      # cols (dom)
+            val = mat[i, j]
+            if not np.isnan(val):
+                ax.text(
+                    j, i,
+                    str(int(round(val))),
+                    ha="center",
+                    va="center",
+                    fontsize=8,
+                    color="black",
+                )
 
     cbar = plt.colorbar(im, ax=ax)
     cbar.set_label("Predicted avg occupancy")
@@ -137,21 +166,20 @@ def plot_calendar_heatmap(daily_df, title):
 def plot_daily_line(day_df, title):
     """
     Line chart for a single day:
-      x-axis: predicted avg occupancy
-      y-axis: time of day
+      x-axis: time (timestamp)
+      y-axis: predicted avg occupancy
     """
     day_df = day_df.sort_values("ds").copy()
-    times = day_df["ds"].dt.strftime("%H:%M")
+    times = day_df["ds"]
     traffic = day_df["yhat"].values
 
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.plot(traffic, range(len(traffic)), marker="o")
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(times, traffic, marker="o")
 
-    ax.set_yticks(range(len(times)))
-    ax.set_yticklabels(times)
-    ax.set_xlabel("Predicted avg occupancy")
-    ax.set_ylabel("Time of day")
+    ax.set_xlabel("Time of day")
+    ax.set_ylabel("Predicted avg occupancy")
     ax.set_title(title)
+    fig.autofmt_xdate()  # rotate x labels
 
     plt.tight_layout()
     return fig
@@ -170,7 +198,7 @@ def main():
     if uploaded_file is None:
         st.stop()
 
-    # Once file is uploaded, load data to help user pick a date range
+    # Load CSV and show basic info
     try:
         df = load_csv_with_optional_header(uploaded_file)
     except Exception as e:
@@ -182,7 +210,7 @@ def main():
         f"Data range: {df['ds'].min().date()} → {df['ds'].max().date()}"
     )
 
-    # Default range: last 30 days of data if possible
+    # Suggested default range: last 30 days of data if possible
     min_date = df["ds"].min().date()
     max_date = df["ds"].max().date()
     default_end = max_date

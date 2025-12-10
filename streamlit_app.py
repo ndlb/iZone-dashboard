@@ -36,25 +36,22 @@ def load_csv_with_optional_header(uploaded_file):
     # First: try as-is
     df = try_read(skiprows=None)
     if df is not None and REQUIRED_COLS.issubset(df.columns):
-        pass  # df is good
+        pass
     else:
         # Second: try skipping first 6 lines (metadata style)
         df = try_read(skiprows=6)
         if df is None or not REQUIRED_COLS.issubset(df.columns):
-            # Neither attempt produced the expected columns
             raise ValueError(
                 "Could not find required columns 'Timestamp' and "
                 "'Average Occupancy' in the CSV (with or without skipping "
                 "the first 6 lines)."
             )
 
-    # At this point df has the right columns
     df = df[list(REQUIRED_COLS)].dropna()
     df["Timestamp"] = pd.to_datetime(df["Timestamp"])
     df = df.sort_values("Timestamp")
     df = df.rename(columns={"Timestamp": "ds", "Average Occupancy": "y"})
     return df
-
 
 
 def train_prophet(df):
@@ -113,16 +110,15 @@ def build_calendar_matrix(daily_df):
       cols  = day of week (0=Mon..6=Sun)
 
     Returns:
-      mat       - traffic values [weeks, dow]
-      day_labels - ['Mon', ..., 'Sun']  (for x-axis)
-      date_labels - same shape as mat, with day-of-month strings for annotation
+      mat         - traffic values [weeks, dow]
+      day_labels  - ['Mon', ..., 'Sun']  (for x-axis)
+      date_labels - same shape as mat, with 'dd/mm' strings for annotation
     """
     if daily_df.empty:
         return None, None, None
 
     max_week = daily_df["week_in_month"].max()
 
-    # traffic matrix and date matrix (day-of-month as string)
     mat = np.full((max_week, 7), np.nan)
     date_labels = np.full((max_week, 7), "", dtype=object)
 
@@ -130,7 +126,8 @@ def build_calendar_matrix(daily_df):
         r = row["week_in_month"] - 1   # week index
         c = row["dow"]                 # 0..6 -> Mon..Sun
         mat[r, c] = row["traffic_pred"]
-        date_labels[r, c] = str(row["dom"])
+        # Format full date as dd/mm
+        date_labels[r, c] = row["date"].strftime("%d/%m")
 
     day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     return mat, day_labels, date_labels
@@ -142,7 +139,7 @@ def plot_calendar_heatmap(daily_df, title):
       x-axis: day of week (Mon–Sun)
       y-axis: weeks (no labels shown)
       color: occupancy (green low -> red high)
-      values inside each box: day-of-month number
+      values inside each box: date as 'dd/mm'
     """
     mat, day_labels, date_labels = build_calendar_matrix(daily_df)
     if mat is None:
@@ -153,19 +150,17 @@ def plot_calendar_heatmap(daily_df, title):
     # Colormap: RdYlGn_r (green low, yellow mid, red high)
     im = ax.imshow(mat, aspect="auto", interpolation="nearest", cmap="RdYlGn_r")
 
-    # X-axis: day of week
     ax.set_xticks(range(len(day_labels)))
     ax.set_xticklabels(day_labels)
 
-    # Y-axis: weeks, but we don't show labels
     ax.set_yticks(range(mat.shape[0]))
     ax.set_yticklabels([])
 
     ax.set_xlabel("Day of week")
-    ax.set_ylabel("")  # no label needed
+    ax.set_ylabel("")
     ax.set_title(title)
 
-    # Annotate each non-NaN cell with the day-of-month
+    # Annotate each non-NaN cell with the date (dd/mm)
     for i in range(mat.shape[0]):          # weeks
         for j in range(mat.shape[1]):      # days of week
             val = mat[i, j]
@@ -202,7 +197,7 @@ def plot_daily_line(day_df, title):
     ax.set_xlabel("Time of day")
     ax.set_ylabel("Predicted avg occupancy")
     ax.set_title(title)
-    fig.autofmt_xdate()  # rotate x labels
+    fig.autofmt_xdate()
 
     plt.tight_layout()
     return fig
@@ -233,7 +228,6 @@ def main():
         f"Data range: {df['ds'].min().date()} → {df['ds'].max().date()}"
     )
 
-    # Suggested default range: last 30 days of data if possible
     min_date = df["ds"].min().date()
     max_date = df["ds"].max().date()
     default_end = max_date
@@ -298,8 +292,8 @@ def main():
                 st.subheader("Daily predicted average occupancy")
                 st.dataframe(
                     daily[["date", "traffic_pred"]]
-                        .round(2)
-                        .rename(columns={"traffic_pred": "predicted_avg_occupancy"})
+                    .round(2)
+                    .rename(columns={"traffic_pred": "predicted_avg_occupancy"})
                 )
 
                 fig = plot_calendar_heatmap(

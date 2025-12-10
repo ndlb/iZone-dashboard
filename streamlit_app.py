@@ -106,8 +106,10 @@ def build_calendar_matrix(daily_df):
     """
     Build matrices for the heatmap:
 
-      rows  = consecutive weeks starting from the FIRST date in the selected range
+      rows  = calendar weeks starting from the first date in the selected range
       cols  = day of week (0=Mon..6=Sun)
+
+    Reading left→right, top→bottom (ignoring blanks) gives dates in order.
 
     Returns:
       mat         - traffic values [week_index, dow]
@@ -117,15 +119,21 @@ def build_calendar_matrix(daily_df):
     if daily_df.empty:
         return None, None, None
 
-    # Make sure rows are in chronological order
+    # Ensure chronological
     daily_df = daily_df.sort_values("date").copy()
 
-    # First date in the selected range
     start_date = daily_df["date"].min()
+    start_weekday = start_date.weekday()  # 0=Mon..6=Sun
 
-    # Week index = number of 7-day blocks since the start date
-    daily_df["week_index"] = ((daily_df["date"] - start_date).dt.days // 7).astype(int)
-    daily_df["dow"] = daily_df["date"].dt.weekday  # 0..6 (Mon..Sun)
+    # Day offset from the very first date in the range
+    daily_df["offset_days"] = (daily_df["date"] - start_date).dt.days
+
+    # Global index measured from the Monday of the first "calendar row"
+    daily_df["global_index"] = start_weekday + daily_df["offset_days"]
+
+    # Week index (row in the heatmap) and column index (day of week)
+    daily_df["week_index"] = (daily_df["global_index"] // 7).astype(int)
+    daily_df["dow"] = (daily_df["global_index"] % 7).astype(int)
 
     max_week = daily_df["week_index"].max()
 
@@ -133,14 +141,14 @@ def build_calendar_matrix(daily_df):
     date_labels = np.full((max_week + 1, 7), "", dtype=object)
 
     for _, row in daily_df.iterrows():
-        r = row["week_index"]        # 0..max_week (rows)
-        c = row["dow"]               # 0..6 (cols = Mon..Sun)
+        r = row["week_index"]        # 0..max_week
+        c = row["dow"]               # 0..6 (Mon..Sun)
         mat[r, c] = row["traffic_pred"]
-        # Annotate with full date as dd/mm
         date_labels[r, c] = row["date"].strftime("%d/%m")
 
     day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     return mat, day_labels, date_labels
+
 
 
 

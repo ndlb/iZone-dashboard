@@ -12,36 +12,49 @@ REQUIRED_COLS = {"Timestamp", "Average Occupancy"}
 
 def load_csv_with_optional_header(uploaded_file):
     """
-    Load CSV that may have 6 lines of metadata at the top.
-    1) Try reading normally.
-    2) If parsing fails OR required columns not found, re-read skipping first 6 lines.
+    Load CSV that may or may not have 6 lines of metadata at the top.
+
+    Strategy:
+      1) Try read_csv with no skiprows.
+      2) If parsing fails OR required columns not found, try again with skiprows=6.
+      3) Use the first version that contains both 'Timestamp' and 'Average Occupancy'.
+
     Uses only 'Timestamp' + 'Average Occupancy'.
     """
     content = uploaded_file.getvalue()
 
-    # First attempt: normal read
-    try:
-        df = pd.read_csv(io.BytesIO(content))
-    except Exception:
-        # Parsing failed (e.g. metadata rows with different column counts)
-        df = pd.read_csv(io.BytesIO(content), skiprows=6)
+    def try_read(skiprows=None):
+        try:
+            if skiprows is None:
+                df_ = pd.read_csv(io.BytesIO(content))
+            else:
+                df_ = pd.read_csv(io.BytesIO(content), skiprows=skiprows)
+        except Exception:
+            return None
+        return df_
+
+    # First: try as-is
+    df = try_read(skiprows=None)
+    if df is not None and REQUIRED_COLS.issubset(df.columns):
+        pass  # df is good
     else:
-        # Parsed OK but may not have the right header row
-        if not REQUIRED_COLS.issubset(df.columns):
-            df = pd.read_csv(io.BytesIO(content), skiprows=6)
+        # Second: try skipping first 6 lines (metadata style)
+        df = try_read(skiprows=6)
+        if df is None or not REQUIRED_COLS.issubset(df.columns):
+            # Neither attempt produced the expected columns
+            raise ValueError(
+                "Could not find required columns 'Timestamp' and "
+                "'Average Occupancy' in the CSV (with or without skipping "
+                "the first 6 lines)."
+            )
 
-    # After fallback, we must have the right columns
-    if not REQUIRED_COLS.issubset(df.columns):
-        raise ValueError(
-            "Could not find required columns 'Timestamp' and "
-            "'Average Occupancy' in the CSV."
-        )
-
+    # At this point df has the right columns
     df = df[list(REQUIRED_COLS)].dropna()
     df["Timestamp"] = pd.to_datetime(df["Timestamp"])
     df = df.sort_values("Timestamp")
     df = df.rename(columns={"Timestamp": "ds", "Average Occupancy": "y"})
     return df
+
 
 
 def train_prophet(df):
@@ -94,62 +107,72 @@ def aggregate_to_daily_avg(forecast_df):
 
 def build_calendar_matrix(daily_df):
     """
-    Build a matrix for the heatmap:
-      rows  = day of week (Mon–Sun)
-      cols  = day of month (1..max_dom in the selected range)
+    Build matrices for the heatmap:
+
+      rows  = weeks in the month (1..max_week_in_month)
+      cols  = day of week (0=Mon..6=Sun)
+
+    Returns:
+      mat       - traffic values [weeks, dow]
+      day_labels - ['Mon', ..., 'Sun']  (for x-axis)
+      date_labels - same shape as mat, with day-of-month strings for annotation
     """
     if daily_df.empty:
         return None, None, None
 
-    max_dom = daily_df["dom"].max()
+    max_week = daily_df["week_in_month"].max()
 
-    mat = np.full((7, max_dom), np.nan)
+    # traffic matrix and date matrix (day-of-month as string)
+    mat = np.full((max_week, 7), np.nan)
+    date_labels = np.full((max_week, 7), "", dtype=object)
 
     for _, row in daily_df.iterrows():
-        r = row["dow"]       # 0..6
-        c = row["dom"] - 1   # day 1 -> col 0
+        r = row["week_in_month"] - 1   # week index
+        c = row["dow"]                 # 0..6 -> Mon..Sun
         mat[r, c] = row["traffic_pred"]
+        date_labels[r, c] = str(row["dom"])
 
     day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    col_labels = [str(d) for d in range(1, max_dom + 1)]
-    return mat, day_labels, col_labels
+    return mat, day_labels, date_labels
 
 
 def plot_calendar_heatmap(daily_df, title):
     """
     GitHub-style monthly heatmap:
-      x-axis: day of month
-      y-axis: day of week
-      color: occupancy (green -> yellow -> red)
-      with rounded traffic values annotated in each cell.
+      x-axis: day of week (Mon–Sun)
+      y-axis: weeks (no labels shown)
+      color: occupancy (green low -> red high)
+      values inside each box: day-of-month number
     """
-    mat, day_labels, col_labels = build_calendar_matrix(daily_df)
+    mat, day_labels, date_labels = build_calendar_matrix(daily_df)
     if mat is None:
         return None
 
-    fig, ax = plt.subplots(figsize=(10, 3))
+    fig, ax = plt.subplots(figsize=(8, 3))
 
-    # Colormap: RdYlGn (green low, red high)
-    im = ax.imshow(mat, aspect="auto", interpolation="nearest", cmap="RdYlGn")
+    # Colormap: RdYlGn_r (green low, yellow mid, red high)
+    im = ax.imshow(mat, aspect="auto", interpolation="nearest", cmap="RdYlGn_r")
 
-    ax.set_yticks(range(len(day_labels)))
-    ax.set_yticklabels(day_labels)
+    # X-axis: day of week
+    ax.set_xticks(range(len(day_labels)))
+    ax.set_xticklabels(day_labels)
 
-    ax.set_xticks(range(len(col_labels)))
-    ax.set_xticklabels(col_labels)
+    # Y-axis: weeks, but we don't show labels
+    ax.set_yticks(range(mat.shape[0]))
+    ax.set_yticklabels([])
 
-    ax.set_xlabel("Day of month")
-    ax.set_ylabel("Day of week")
+    ax.set_xlabel("Day of week")
+    ax.set_ylabel("")  # no label needed
     ax.set_title(title)
 
-    # Annotate each non-NaN cell with rounded traffic value
-    for i in range(mat.shape[0]):          # rows (dow)
-        for j in range(mat.shape[1]):      # cols (dom)
+    # Annotate each non-NaN cell with the day-of-month
+    for i in range(mat.shape[0]):          # weeks
+        for j in range(mat.shape[1]):      # days of week
             val = mat[i, j]
-            if not np.isnan(val):
+            if not np.isnan(val) and date_labels[i, j] != "":
                 ax.text(
                     j, i,
-                    str(int(round(val))),
+                    date_labels[i, j],
                     ha="center",
                     va="center",
                     fontsize=8,
@@ -275,8 +298,8 @@ def main():
                 st.subheader("Daily predicted average occupancy")
                 st.dataframe(
                     daily[["date", "traffic_pred"]]
-                    .round(2)
-                    .rename(columns={"traffic_pred": "predicted_avg_occupancy"})
+                        .round(2)
+                        .rename(columns={"traffic_pred": "predicted_avg_occupancy"})
                 )
 
                 fig = plot_calendar_heatmap(
@@ -286,7 +309,7 @@ def main():
                 if fig is None:
                     st.error("Could not build calendar heatmap.")
                 else:
-                    st.subheader("GitHub-style monthly heatmap")
+                    st.subheader("Monthly heatmap (GitHub-style)")
                     st.pyplot(fig)
 
             else:  # Single-day line chart

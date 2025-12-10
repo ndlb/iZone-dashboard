@@ -106,31 +106,42 @@ def build_calendar_matrix(daily_df):
     """
     Build matrices for the heatmap:
 
-      rows  = weeks in the month (1..max_week_in_month)
+      rows  = consecutive weeks starting from the FIRST date in the selected range
       cols  = day of week (0=Mon..6=Sun)
 
     Returns:
-      mat         - traffic values [weeks, dow]
+      mat         - traffic values [week_index, dow]
       day_labels  - ['Mon', ..., 'Sun']  (for x-axis)
       date_labels - same shape as mat, with 'dd/mm' strings for annotation
     """
     if daily_df.empty:
         return None, None, None
 
-    max_week = daily_df["week_in_month"].max()
+    # Make sure rows are in chronological order
+    daily_df = daily_df.sort_values("date").copy()
 
-    mat = np.full((max_week, 7), np.nan)
-    date_labels = np.full((max_week, 7), "", dtype=object)
+    # First date in the selected range
+    start_date = daily_df["date"].min()
+
+    # Week index = number of 7-day blocks since the start date
+    daily_df["week_index"] = ((daily_df["date"] - start_date).dt.days // 7).astype(int)
+    daily_df["dow"] = daily_df["date"].dt.weekday  # 0..6 (Mon..Sun)
+
+    max_week = daily_df["week_index"].max()
+
+    mat = np.full((max_week + 1, 7), np.nan)
+    date_labels = np.full((max_week + 1, 7), "", dtype=object)
 
     for _, row in daily_df.iterrows():
-        r = row["week_in_month"] - 1   # week index
-        c = row["dow"]                 # 0..6 -> Mon..Sun
+        r = row["week_index"]        # 0..max_week (rows)
+        c = row["dow"]               # 0..6 (cols = Mon..Sun)
         mat[r, c] = row["traffic_pred"]
-        # Format full date as dd/mm
+        # Annotate with full date as dd/mm
         date_labels[r, c] = row["date"].strftime("%d/%m")
 
     day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     return mat, day_labels, date_labels
+
 
 
 def plot_calendar_heatmap(daily_df, title):

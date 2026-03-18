@@ -144,7 +144,7 @@ def build_calendar_matrix(daily_df):
         r = row["week_index"]        # 0..max_week
         c = row["dow"]               # 0..6 (Mon..Sun)
         mat[r, c] = row["traffic_pred"]
-        date_labels[r, c] = row["date"].strftime("%d/%m")
+        date_labels[r, c] = row["date"].strftime("%m/%d")
 
     day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     return mat, day_labels, date_labels

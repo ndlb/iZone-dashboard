@@ -207,7 +207,7 @@ def plot_daily_line(day_df, title):
       y-axis: predicted avg occupancy
     """
     day_df = day_df.sort_values("ds").copy()
-    times = day_df["ds"]
+    times = day_df["ds"].strftime("%H:%M")
     traffic = day_df["yhat"].values
 
     fig, ax = plt.subplots(figsize=(8, 4))

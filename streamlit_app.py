@@ -1,4 +1,5 @@
 import io
+import os
 import datetime as dt
 
 import numpy as np
@@ -9,51 +10,53 @@ from prophet import Prophet
 
 REQUIRED_COLS = {"Timestamp", "Average Occupancy"}
 
+# Path to the demo CSV committed in the repo. Change this to match the
+# actual filename you commit (e.g. "demo_data.csv" or "data/occupancy.csv").
+DEMO_CSV_PATH = "occupancy_last.csv"
+
 
 # ---------------------------------------------------------------------------
 # Custom events (academic calendar: breaks + exam periods)
 # ---------------------------------------------------------------------------
-
 def build_custom_events():
     events = pd.DataFrame([
         # 2026
-        {"holiday": "spring_break",  "start": "2026-03-07", "end": "2026-03-15"},
-        {"holiday": "reading_days",  "start": "2026-05-02", "end": "2026-05-04"},
-        {"holiday": "finals_week",   "start": "2026-05-05", "end": "2026-05-10"},
+        {"holiday": "spring_break", "start": "2026-03-07", "end": "2026-03-15"},
+        {"holiday": "reading_days", "start": "2026-05-02", "end": "2026-05-04"},
+        {"holiday": "finals_week", "start": "2026-05-05", "end": "2026-05-10"},
         # 2025
-        {"holiday": "spring_break",  "start": "2025-03-08", "end": "2025-03-16"},
-        {"holiday": "reading_days",  "start": "2025-05-03", "end": "2025-05-05"},
-        {"holiday": "finals_week",   "start": "2025-05-06", "end": "2025-05-11"},
-        {"holiday": "summer_break",  "start": "2025-05-18", "end": "2025-08-24"},
-        {"holiday": "fall_break",    "start": "2025-10-13", "end": "2025-10-14"},
-        {"holiday": "thanksgiving",  "start": "2025-11-26", "end": "2025-11-30"},
-        {"holiday": "reading_days",  "start": "2025-12-09", "end": "2025-12-11"},
-        {"holiday": "finals_week",   "start": "2025-12-12", "end": "2025-12-17"},
-        {"holiday": "winter_break",  "start": "2025-12-17", "end": "2026-01-19"},
+        {"holiday": "spring_break", "start": "2025-03-08", "end": "2025-03-16"},
+        {"holiday": "reading_days", "start": "2025-05-03", "end": "2025-05-05"},
+        {"holiday": "finals_week", "start": "2025-05-06", "end": "2025-05-11"},
+        {"holiday": "summer_break", "start": "2025-05-18", "end": "2025-08-24"},
+        {"holiday": "fall_break", "start": "2025-10-13", "end": "2025-10-14"},
+        {"holiday": "thanksgiving", "start": "2025-11-26", "end": "2025-11-30"},
+        {"holiday": "reading_days", "start": "2025-12-09", "end": "2025-12-11"},
+        {"holiday": "finals_week", "start": "2025-12-12", "end": "2025-12-17"},
+        {"holiday": "winter_break", "start": "2025-12-17", "end": "2026-01-19"},
         # 2024
-        {"holiday": "spring_break",  "start": "2024-03-09", "end": "2024-03-17"},
-        {"holiday": "reading_days",  "start": "2024-05-01", "end": "2024-05-04"},
-        {"holiday": "finals_week",   "start": "2024-05-05", "end": "2024-05-11"},
-        {"holiday": "summer_break",  "start": "2024-05-12", "end": "2024-08-25"},
-        {"holiday": "fall_break",    "start": "2024-10-14", "end": "2024-10-15"},
-        {"holiday": "thanksgiving",  "start": "2024-11-27", "end": "2024-12-01"},
-        {"holiday": "reading_days",  "start": "2024-12-10", "end": "2024-12-12"},
-        {"holiday": "finals_week",   "start": "2024-12-13", "end": "2024-12-18"},
-        {"holiday": "winter_break",  "start": "2024-12-19", "end": "2025-01-20"},
+        {"holiday": "spring_break", "start": "2024-03-09", "end": "2024-03-17"},
+        {"holiday": "reading_days", "start": "2024-05-01", "end": "2024-05-04"},
+        {"holiday": "finals_week", "start": "2024-05-05", "end": "2024-05-11"},
+        {"holiday": "summer_break", "start": "2024-05-12", "end": "2024-08-25"},
+        {"holiday": "fall_break", "start": "2024-10-14", "end": "2024-10-15"},
+        {"holiday": "thanksgiving", "start": "2024-11-27", "end": "2024-12-01"},
+        {"holiday": "reading_days", "start": "2024-12-10", "end": "2024-12-12"},
+        {"holiday": "finals_week", "start": "2024-12-13", "end": "2024-12-18"},
+        {"holiday": "winter_break", "start": "2024-12-19", "end": "2025-01-20"},
         # 2023
-        {"holiday": "summer_break",  "start": "2023-05-12", "end": "2023-08-29"},
-        {"holiday": "fall_break",    "start": "2023-10-16", "end": "2023-10-17"},
-        {"holiday": "thanksgiving",  "start": "2023-11-22", "end": "2023-11-26"},
-        {"holiday": "reading_days",  "start": "2023-12-14", "end": "2023-12-16"},
-        {"holiday": "finals_week",   "start": "2023-12-17", "end": "2023-12-22"},
-        {"holiday": "winter_break",  "start": "2023-12-23", "end": "2024-01-16"},
+        {"holiday": "summer_break", "start": "2023-05-12", "end": "2023-08-29"},
+        {"holiday": "fall_break", "start": "2023-10-16", "end": "2023-10-17"},
+        {"holiday": "thanksgiving", "start": "2023-11-22", "end": "2023-11-26"},
+        {"holiday": "reading_days", "start": "2023-12-14", "end": "2023-12-16"},
+        {"holiday": "finals_week", "start": "2023-12-17", "end": "2023-12-22"},
+        {"holiday": "winter_break", "start": "2023-12-23", "end": "2024-01-16"},
     ])
     events["start"] = pd.to_datetime(events["start"])
-    events["end"]   = pd.to_datetime(events["end"])
-
+    events["end"] = pd.to_datetime(events["end"])
     custom_events = pd.DataFrame({
-        "holiday":      events["holiday"],
-        "ds":           events["start"],
+        "holiday": events["holiday"],
+        "ds": events["start"],
         "lower_window": 0,
         "upper_window": (events["end"] - events["start"]).dt.days,
     })
@@ -63,20 +66,15 @@ def build_custom_events():
 # ---------------------------------------------------------------------------
 # CSV loading
 # ---------------------------------------------------------------------------
-
-def load_csv_with_optional_header(uploaded_file):
+def _parse_csv_bytes(content):
     """
-    Load CSV that may or may not have 6 lines of metadata at the top.
-
+    Parse CSV bytes that may or may not have 6 lines of metadata at the top.
     Strategy:
       1) Try read_csv with no skiprows.
       2) If parsing fails OR required columns not found, try again with skiprows=6.
       3) Use the first version that contains both 'Timestamp' and 'Average Occupancy'.
-
     Uses only 'Timestamp' + 'Average Occupancy'.
     """
-    content = uploaded_file.getvalue()
-
     def try_read(skiprows=None):
         try:
             if skiprows is None:
@@ -106,10 +104,21 @@ def load_csv_with_optional_header(uploaded_file):
     return df
 
 
+def load_csv_with_optional_header(uploaded_file):
+    """Load from a Streamlit UploadedFile object."""
+    return _parse_csv_bytes(uploaded_file.getvalue())
+
+
+@st.cache_data(show_spinner=False)
+def load_csv_from_path(path):
+    """Load the demo CSV committed in the repo. Cached so it only reads once."""
+    with open(path, "rb") as f:
+        return _parse_csv_bytes(f.read())
+
+
 # ---------------------------------------------------------------------------
 # Training window: most recent 720 days
 # ---------------------------------------------------------------------------
-
 def trim_to_training_window(df, training_days=720):
     """
     Keep only the most recent `training_days` days of data.
@@ -124,13 +133,12 @@ def trim_to_training_window(df, training_days=720):
 # ---------------------------------------------------------------------------
 # Model training
 # ---------------------------------------------------------------------------
-
 def train_prophet(df, custom_events):
     """
     Train a Prophet model with:
       - daily_seasonality = True
       - weekly_seasonality = True
-      - yearly_seasonality = False   (per spec)
+      - yearly_seasonality = False (per spec)
       - custom academic-calendar holidays injected via the holidays DataFrame
     """
     m = Prophet(
@@ -146,7 +154,6 @@ def train_prophet(df, custom_events):
 # ---------------------------------------------------------------------------
 # Forecasting helpers
 # ---------------------------------------------------------------------------
-
 def forecast_range(model, last_ds, start_date, end_date, freq="30min"):
     """
     Make predictions from start_date to end_date (inclusive),
@@ -159,7 +166,6 @@ def forecast_range(model, last_ds, start_date, end_date, freq="30min"):
 
     future = model.make_future_dataframe(periods=horizon, freq=freq)
     forecast = model.predict(future)
-
     mask = (forecast["ds"] >= start_date) & (forecast["ds"] <= end_date)
     return forecast.loc[mask].copy()
 
@@ -177,10 +183,10 @@ def aggregate_to_daily_avg(forecast_df):
         .reset_index()
         .rename(columns={"yhat": "traffic_pred"})
     )
-    daily["date"]         = pd.to_datetime(daily["date"])
-    daily["dow"]          = daily["date"].dt.weekday        # 0=Mon, 6=Sun
-    daily["day_name"]     = daily["date"].dt.day_name()
-    daily["dom"]          = daily["date"].dt.day            # day of month
+    daily["date"] = pd.to_datetime(daily["date"])
+    daily["dow"] = daily["date"].dt.weekday  # 0=Mon, 6=Sun
+    daily["day_name"] = daily["date"].dt.day_name()
+    daily["dom"] = daily["date"].dt.day  # day of month
     daily["week_in_month"] = ((daily["dom"] - 1) // 7) + 1
     return daily
 
@@ -188,42 +194,37 @@ def aggregate_to_daily_avg(forecast_df):
 # ---------------------------------------------------------------------------
 # Calendar heatmap helpers
 # ---------------------------------------------------------------------------
-
 def build_calendar_matrix(daily_df):
     """
     Build matrices for the heatmap:
-
-      rows  = calendar weeks starting from the first date in the selected range
-      cols  = day of week (0=Mon..6=Sun)
-
-    Reading left→right, top→bottom (ignoring blanks) gives dates in order.
-
+      rows = calendar weeks starting from the first date in the selected range
+      cols = day of week (0=Mon..6=Sun)
+    Reading left->right, top->bottom (ignoring blanks) gives dates in order.
     Returns:
       mat         - traffic values [week_index, dow]
-      day_labels  - ['Mon', ..., 'Sun']  (for x-axis)
+      day_labels  - ['Mon', ..., 'Sun'] (for x-axis)
       date_labels - same shape as mat, with 'dd/mm' strings for annotation
     """
     if daily_df.empty:
         return None, None, None
 
     daily_df = daily_df.sort_values("date").copy()
-
-    start_date    = daily_df["date"].min()
+    start_date = daily_df["date"].min()
     start_weekday = start_date.weekday()  # 0=Mon..6=Sun
 
-    daily_df["offset_days"]  = (daily_df["date"] - start_date).dt.days
+    daily_df["offset_days"] = (daily_df["date"] - start_date).dt.days
     daily_df["global_index"] = start_weekday + daily_df["offset_days"]
-    daily_df["week_index"]   = (daily_df["global_index"] // 7).astype(int)
-    daily_df["dow"]          = (daily_df["global_index"] %  7).astype(int)
+    daily_df["week_index"] = (daily_df["global_index"] // 7).astype(int)
+    daily_df["dow"] = (daily_df["global_index"] % 7).astype(int)
 
-    max_week    = daily_df["week_index"].max()
-    mat         = np.full((max_week + 1, 7), np.nan)
+    max_week = daily_df["week_index"].max()
+    mat = np.full((max_week + 1, 7), np.nan)
     date_labels = np.full((max_week + 1, 7), "", dtype=object)
 
     for _, row in daily_df.iterrows():
         r = row["week_index"]
         c = row["dow"]
-        mat[r, c]         = row["traffic_pred"]
+        mat[r, c] = row["traffic_pred"]
         date_labels[r, c] = row["date"].strftime("%m/%d")
 
     day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -233,7 +234,7 @@ def build_calendar_matrix(daily_df):
 def plot_calendar_heatmap(daily_df, title):
     """
     GitHub-style monthly heatmap:
-      x-axis: day of week (Mon–Sun)
+      x-axis: day of week (Mon-Sun)
       y-axis: weeks (no labels shown)
       color: occupancy (green low -> red high)
       values inside each box: date as 'dd/mm'
@@ -243,7 +244,6 @@ def plot_calendar_heatmap(daily_df, title):
         return None
 
     fig, ax = plt.subplots(figsize=(8, 3))
-
     im = ax.imshow(mat, aspect="auto", interpolation="nearest", cmap="RdYlGn_r")
 
     ax.set_xticks(range(len(day_labels)))
@@ -267,7 +267,6 @@ def plot_calendar_heatmap(daily_df, title):
 
     cbar = plt.colorbar(im, ax=ax)
     cbar.set_label("Predicted avg occupancy")
-
     plt.tight_layout()
     return fig
 
@@ -294,7 +293,6 @@ def plot_daily_line(day_df, title):
     ax.set_xlabel("Time of day")
     ax.set_ylabel("Predicted avg occupancy")
     ax.set_title(title)
-
     plt.tight_layout()
     return fig
 
@@ -302,11 +300,11 @@ def plot_daily_line(day_df, title):
 # ---------------------------------------------------------------------------
 # Streamlit app
 # ---------------------------------------------------------------------------
-
 def main():
     st.title("Traffic Forecast Dashboard (Prophet)")
     st.write(
-        "Upload a CSV with **Timestamp** and **Average Occupancy** "
+        "Try the built-in demo data, or upload your own CSV with "
+        "**Timestamp** and **Average Occupancy** "
         "(first 6 lines of metadata are okay). "
         "Choose a ~1-month range and how you want to view the prediction."
     )
@@ -314,44 +312,62 @@ def main():
     # Pre-build custom events once
     custom_events = build_custom_events()
 
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    # ---- Data source selector ----
+    demo_available = os.path.exists(DEMO_CSV_PATH)
+    options = ["Use demo data", "Upload my own CSV"]
+    default_index = 0 if demo_available else 1
+    data_source = st.radio("Data source", options, index=default_index)
 
-    if uploaded_file is None:
-        st.stop()
+    df_full = None
 
-    # ---- Load CSV ----
-    try:
-        df_full = load_csv_with_optional_header(uploaded_file)
-    except Exception as e:
-        st.error(f"Error reading CSV: {e}")
-        st.stop()
+    if data_source == "Use demo data":
+        if not demo_available:
+            st.error(
+                f"Demo file `{DEMO_CSV_PATH}` was not found in the repo. "
+                "Commit your sample CSV with that name (or update DEMO_CSV_PATH), "
+                "or switch to 'Upload my own CSV'."
+            )
+            st.stop()
+        try:
+            df_full = load_csv_from_path(DEMO_CSV_PATH)
+            st.caption(f"Showing a demo using `{DEMO_CSV_PATH}` from the repo.")
+        except Exception as e:
+            st.error(f"Error reading demo CSV: {e}")
+            st.stop()
+    else:
+        uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+        if uploaded_file is None:
+            st.stop()
+        try:
+            df_full = load_csv_with_optional_header(uploaded_file)
+        except Exception as e:
+            st.error(f"Error reading CSV: {e}")
+            st.stop()
 
     st.success(
-        f"Loaded {len(df_full):,} rows from CSV. "
-        f"Data range: {df_full['ds'].min().date()} → {df_full['ds'].max().date()}"
+        f"Loaded {len(df_full):,} rows. "
+        f"Data range: {df_full['ds'].min().date()} -> {df_full['ds'].max().date()}"
     )
 
     # ---- Trim to training window ----
     TRAINING_DAYS = 720
     df_train = trim_to_training_window(df_full, training_days=TRAINING_DAYS)
-
     st.info(
         f"Training window: most recent **{TRAINING_DAYS} days** of data — "
-        f"{df_train['ds'].min().date()} → {df_train['ds'].max().date()} "
+        f"{df_train['ds'].min().date()} -> {df_train['ds'].max().date()} "
         f"({len(df_train):,} rows used for training)."
     )
 
     # ---- Date range selector ----
-    min_date     = df_train["ds"].min().date()
-    max_date     = df_train["ds"].max().date()
-    default_end   = max_date
+    min_date = df_train["ds"].min().date()
+    max_date = df_train["ds"].max().date()
+    default_end = max_date
     default_start = max(min_date, default_end - dt.timedelta(days=29))
 
     date_range = st.date_input(
         "Forecast date range (should be about one month)",
         value=(default_start, default_end),
     )
-
     if not isinstance(date_range, (list, tuple)) or len(date_range) != 2:
         st.error("Please select a start and end date.")
         st.stop()
@@ -362,8 +378,7 @@ def main():
         st.stop()
 
     diff_days = (end_date - start_date).days + 1
-    st.write(f"Selected range: {start_date} → {end_date} ({diff_days} days)")
-
+    st.write(f"Selected range: {start_date} -> {end_date} ({diff_days} days)")
     if diff_days < 25 or diff_days > 35:
         st.warning(
             "For stability, the forecasting range should be roughly one month "
@@ -392,10 +407,8 @@ def main():
             try:
                 model = train_prophet(df_train, custom_events)
                 last_ds = df_train["ds"].max()
-
                 start_dt = dt.datetime.combine(start_date, dt.time(0, 0))
-                end_dt   = dt.datetime.combine(end_date,   dt.time(23, 30))
-
+                end_dt = dt.datetime.combine(end_date, dt.time(23, 30))
                 forecast = forecast_range(model, last_ds, start_dt, end_dt)
             except Exception as e:
                 st.error(f"Error during forecasting: {e}")
@@ -416,7 +429,7 @@ def main():
 
                 fig = plot_calendar_heatmap(
                     daily,
-                    title=f"Predicted avg occupancy ({start_date} → {end_date})",
+                    title=f"Predicted avg occupancy ({start_date} -> {end_date})",
                 )
                 if fig is None:
                     st.error("Could not build calendar heatmap.")
@@ -429,9 +442,8 @@ def main():
                     st.error("Detail date must lie inside the forecast range.")
                     st.stop()
 
-                mask   = forecast["ds"].dt.date == detail_date
+                mask = forecast["ds"].dt.date == detail_date
                 day_df = forecast.loc[mask].copy()
-
                 if day_df.empty:
                     st.error("No forecast data for that detail date.")
                     st.stop()

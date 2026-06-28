@@ -12,7 +12,7 @@ REQUIRED_COLS = {"Timestamp", "Average Occupancy"}
 
 # Path to the demo CSV committed in the repo. Change this to match the
 # actual filename you commit (e.g. "demo_data.csv" or "data/occupancy.csv").
-DEMO_CSV_PATH = "occupancy_last.csv"
+DEMO_CSV_PATH = "demo_data.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +149,16 @@ def train_prophet(df, custom_events):
     )
     m.fit(df)
     return m
+
+
+@st.cache_resource(show_spinner=False)
+def get_trained_model(df_train, custom_events):
+    """
+    Cache the trained model so reruns don't retrain Prophet every time.
+    This matters now that demo data auto-runs and any control change
+    (date range, view mode) triggers a rerun.
+    """
+    return train_prophet(df_train, custom_events)
 
 
 # ---------------------------------------------------------------------------
@@ -359,10 +369,11 @@ def main():
     )
 
     # ---- Date range selector ----
-    min_date = df_train["ds"].min().date()
+    # Default range: one month starting from the final date in the data,
+    # i.e. forecasting forward from the last observed point.
     max_date = df_train["ds"].max().date()
-    default_end = max_date
-    default_start = max(min_date, default_end - dt.timedelta(days=29))
+    default_start = max_date
+    default_end = default_start + dt.timedelta(days=29)
 
     date_range = st.date_input(
         "Forecast date range (should be about one month)",
@@ -400,12 +411,18 @@ def main():
         )
 
     # ---- Run forecast ----
-    if st.button("Run forecast"):
+    # Demo data runs automatically; uploaded data waits for the button.
+    if data_source == "Use demo data":
+        run_forecast = True
+    else:
+        run_forecast = st.button("Run forecast")
+
+    if run_forecast:
         with st.spinner(
             "Training Prophet model on the most recent 720 days and generating forecast…"
         ):
             try:
-                model = train_prophet(df_train, custom_events)
+                model = get_trained_model(df_train, custom_events)
                 last_ds = df_train["ds"].max()
                 start_dt = dt.datetime.combine(start_date, dt.time(0, 0))
                 end_dt = dt.datetime.combine(end_date, dt.time(23, 30))

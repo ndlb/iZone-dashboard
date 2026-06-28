@@ -12,7 +12,7 @@ REQUIRED_COLS = {"Timestamp", "Average Occupancy"}
 
 # Path to the demo CSV committed in the repo. Change this to match the
 # actual filename you commit (e.g. "demo_data.csv" or "data/occupancy.csv").
-DEMO_CSV_PATH = "demo_data.csv"
+DEMO_CSV_PATH = "occupancy_last.csv"
 
 
 # ---------------------------------------------------------------------------

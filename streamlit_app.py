@@ -12,7 +12,7 @@ REQUIRED_COLS = {"Timestamp", "Average Occupancy"}
 
 # Path to the demo CSV committed in the repo. Change this to match the
 # actual filename you commit (e.g. "demo_data.csv" or "data/occupancy.csv").
-DEMO_CSV_PATH = "occupancy_last.csv"
+DEMO_CSV_PATH = "demo_data.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +176,10 @@ def forecast_range(model, last_ds, start_date, end_date, freq="30min"):
 
     future = model.make_future_dataframe(periods=horizon, freq=freq)
     forecast = model.predict(future)
+    # Occupancy can't be negative; clip predictions (and intervals) at 0.
+    for col in ["yhat", "yhat_lower", "yhat_upper"]:
+        if col in forecast.columns:
+            forecast[col] = forecast[col].clip(lower=0)
     mask = (forecast["ds"] >= start_date) & (forecast["ds"] <= end_date)
     return forecast.loc[mask].copy()
 
